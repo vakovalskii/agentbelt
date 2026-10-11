@@ -27,6 +27,8 @@ import urllib.parse
 
 # macOS: iTerm2 Python API. Windows: WezTerm via its CLI (wezterm_term.py), same pages.
 IS_WIN = sys.platform == "win32"
+# a console program started from pythonw opens its own console window unless told not to
+NO_WINDOW = {"creationflags": 0x08000000} if IS_WIN else {}
 if IS_WIN:
     iterm2 = None
     import wezterm_term as wez
@@ -124,7 +126,7 @@ async def run(cmd: list[str], cwd: str | None = None, timeout: float = 10.0) -> 
             *cmd, cwd=cwd, env=NOPROXY_ENV,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
             # a background process on Windows would flash a console window per command
-            **({"creationflags": 0x08000000} if IS_WIN else {}))
+            **NO_WINDOW)
         out, _ = await asyncio.wait_for(p.communicate(), timeout)
         return p.returncode or 0, ANSI.sub("", out.decode("utf-8", "replace"))
     except asyncio.TimeoutError:
@@ -1448,9 +1450,9 @@ async def _curl(proxy: str, url: str) -> dict:
     p = None
     try:
         p = await asyncio.create_subprocess_exec(
-            "curl", "-s", "-o", "/dev/null", "-m", "8", "-w", "%{http_code} %{time_total}", "-K", "-",
+            "curl", "-s", "-o", os.devnull, "-m", "8", "-w", "%{http_code} %{time_total}", "-K", "-",
             env=NOPROXY_ENV, stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, **NO_WINDOW)
         out, _ = await asyncio.wait_for(p.communicate(conf.encode()), 12)
         code, t = (out.decode().split() + ["0", "0"])[:2]
         return {"code": int(code), "ms": round(float(t) * 1000)}
@@ -1660,7 +1662,7 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
             # the line carries the proxy password: it goes straight to the clipboard, never to the page
             line = proxy_export(qs.get("name", ""))
             if line:
-                p = await asyncio.create_subprocess_exec("clip" if IS_WIN else "pbcopy", stdin=asyncio.subprocess.PIPE)
+                p = await asyncio.create_subprocess_exec("clip" if IS_WIN else "pbcopy", stdin=asyncio.subprocess.PIPE, **NO_WINDOW)
                 # a trailing newline keeps two pastes in a row from gluing into one command
                 await p.communicate((line + "\n").encode())
                 res = "copied"

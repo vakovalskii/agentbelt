@@ -16,6 +16,3 @@ Start-Process -FilePath $edge -ArgumentList @(
     "--window-size=$w,$($wa.Height)", "--window-position=$($wa.Right - $w),$($wa.Top)",
     "--no-first-run", "--disable-features=Translate")
 
-# reserve the strip so maximized windows stop at the belt; the docker lives as long as the window
-Start-Process -FilePath "conhost.exe" -WindowStyle Hidden -ArgumentList @(
-    "--headless", "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $PSScriptRoot "dock-belt.ps1"), "-Width", $w)

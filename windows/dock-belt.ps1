@@ -1,3 +1,5 @@
+# Opt-in, not started by open-belt.ps1: Windows re-lays the whole desktop around an app bar
+# (maximized windows, Alt+Tab) and that felt broken. Run by hand if a reserved strip is wanted.
 # Docks the toolbelt window to the right edge as a Windows app bar: the shell reserves the strip,
 # so maximized windows (browser, WezTerm) stop at its left edge instead of covering it, the way the
 # toolbelt sits beside the terminal on macOS. Runs as long as the window lives, then frees the strip.

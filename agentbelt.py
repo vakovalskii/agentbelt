@@ -946,14 +946,19 @@ NO_PROXY_PREFIX = "env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy
 
 
 def proxy_prefix(name: str) -> str | None:
-    """Env prefix that runs a command through a proxy from the local config ("direct" = none)."""
+    """Env prefix that runs a command through a proxy from the local config ("direct" = none).
+    Optional comma-separated "no_proxy" hosts are passed in both environment variable cases."""
     if name == "direct":
         return NO_PROXY_PREFIX
-    url = next((p["url"] for p in CFG.get("proxies") or [] if p.get("url") and p.get("name") == name), None)
-    if not url:
+    p = next((p for p in CFG.get("proxies") or [] if p.get("url") and p.get("name") == name), None)
+    if not p:
         return None
-    q = shlex.quote(url)
-    return f"HTTPS_PROXY={q} HTTP_PROXY={q}"
+    q = shlex.quote(p["url"])
+    pre = f"HTTPS_PROXY={q} HTTP_PROXY={q}"
+    if p.get("no_proxy"):
+        nq = shlex.quote(str(p["no_proxy"]))
+        pre += f" NO_PROXY={nq} no_proxy={nq}"
+    return pre
 
 
 def proxy_export(name: str) -> str | None:
@@ -1302,7 +1307,11 @@ def _save_network(new: dict, cfg: dict) -> str | None:
             if not PROXY_URL.match(url):
                 return f"proxy «{name}»: expected scheme://[user:pass@]host:port"
             seen.add(name)
-            out.append({"name": name, "url": url})
+            item = {"name": name, "url": url}
+            no_proxy = str(px.get("no_proxy") or "").strip()
+            if no_proxy:
+                item["no_proxy"] = no_proxy
+            out.append(item)
         cfg["proxies"] = out
     if isinstance(new.get("servers"), list):
         out = []

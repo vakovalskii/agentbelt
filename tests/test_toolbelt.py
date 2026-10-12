@@ -499,12 +499,16 @@ def test_active_agents_includes_pi_without_a_terminal_but_not_suspended(t, monke
 # ─────────────── launching agents ───────────────
 
 
-def test_proxy_prefix_and_export(t):
-    assert t.proxy_prefix("eu-1") == "HTTPS_PROXY=http://user:s3cret@203.0.113.10:3128 " \
-                                     "HTTP_PROXY=http://user:s3cret@203.0.113.10:3128"
+@pytest.mark.parametrize("no_proxy", [None, ""])
+def test_proxy_prefix_and_export(t, no_proxy):
+    if no_proxy is not None:
+        t.CFG["proxies"][0]["no_proxy"] = no_proxy
+    expected = "HTTPS_PROXY=http://user:s3cret@203.0.113.10:3128 " \
+               "HTTP_PROXY=http://user:s3cret@203.0.113.10:3128"
+    assert t.proxy_prefix("eu-1") == expected
     assert t.proxy_prefix("direct").startswith("env -u HTTPS_PROXY")
     assert t.proxy_prefix("nope") is None
-    assert t.proxy_export("eu-1").startswith("export HTTPS_PROXY=")
+    assert t.proxy_export("eu-1") == "export " + expected
     assert t.proxy_export("direct").startswith("unset HTTPS_PROXY")
     assert t.proxy_export("nope") is None
 
@@ -512,6 +516,39 @@ def test_proxy_prefix_and_export(t):
 def test_proxy_prefix_quotes_shell_characters(t):
     t.CFG["proxies"] = [{"name": "odd", "url": "http://u:p$a;ss@1.2.3.4:1"}]
     assert "'http://u:p$a;ss@1.2.3.4:1'" in t.proxy_prefix("odd")
+
+
+def test_proxy_prefix_and_export_with_no_proxy(t):
+    no_proxy = "github.com,.github.com,.githubusercontent.com"
+    t.CFG["proxies"][0]["no_proxy"] = no_proxy
+    expected = "HTTPS_PROXY=http://user:s3cret@203.0.113.10:3128 " \
+               "HTTP_PROXY=http://user:s3cret@203.0.113.10:3128 " \
+               f"NO_PROXY={no_proxy} no_proxy={no_proxy}"
+    assert t.proxy_prefix("eu-1") == expected
+    assert t.proxy_export("eu-1") == "export " + expected
+    assert "NO_PROXY=" not in t.proxy_prefix("us-1")
+
+
+@pytest.mark.parametrize("export", [False, True])
+def test_proxy_no_proxy_survives_shell_quoting(t, export):
+    no_proxy = "localhost,space here,'quote',$HOME,$(printf expanded),`printf expanded`; printf injected"
+    t.CFG["proxies"][0]["no_proxy"] = no_proxy
+    prefix = t.proxy_export("eu-1") + ";" if export else t.proxy_prefix("eu-1")
+    command = prefix + " /bin/sh -c " + shlex.quote('printf \'%s\\n%s\' "$NO_PROXY" "$no_proxy"')
+    result = subprocess.run(["/bin/sh", "-c", command], capture_output=True, text=True, check=True)
+    assert result.stdout == no_proxy + "\n" + no_proxy
+    assert result.stderr == ""
+
+
+@pytest.mark.parametrize("tool", ["claude", "codex", "pi", "omp"])
+@pytest.mark.parametrize("default_proxy", [False, True])
+def test_agent_command_passes_proxy_exclusions(t, tool, default_proxy):
+    no_proxy = "github.com,.github.com"
+    t.CFG["proxies"][0]["no_proxy"] = no_proxy
+    if default_proxy:
+        t.CFG["agents"][tool]["proxy"] = "eu-1"
+    command = t.agent_command(tool, "session-1234", False, "" if default_proxy else "eu-1")
+    assert f"NO_PROXY={no_proxy} no_proxy={no_proxy} {tool} " in command
 
 
 def test_agent_command_claude(t):
@@ -788,6 +825,37 @@ def test_settings_round_trip_keeps_stored_passwords(t):
     assert saved["proxies"] == PROXIES
     assert saved["keenetic"]["password"] == "routerpw"
     assert os.stat(t.CONFIG_FILE).st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("name", ["eu-1", "eu-main"])
+def test_settings_round_trip_keeps_no_proxy_and_masked_password(t, name):
+    no_proxy = "github.com,.github.com,.githubusercontent.com"
+    t.CFG["proxies"][0]["no_proxy"] = no_proxy
+    t.save_config(t.CFG)
+    shown = t.settings_state()["config"]["proxies"]
+    assert shown[0]["no_proxy"] == no_proxy
+    assert shown[0]["url"] == "http://user:***@203.0.113.10:3128"
+    proxies = [dict(p, orig=p["name"]) for p in shown]
+    proxies[0]["name"] = name
+    assert _save(t, {"proxies": proxies}) == "ok"
+    expected = [dict(PROXIES[0], name=name, no_proxy=no_proxy), PROXIES[1]]
+    assert t.CFG["proxies"] == expected
+    assert t.load_config()["proxies"] == expected
+
+
+@pytest.mark.parametrize("value, expected", [("  github.com,.github.com  ", "github.com,.github.com"),
+                                             ("", None), ("   ", None)])
+def test_settings_updates_or_clears_no_proxy(t, value, expected):
+    t.CFG["proxies"][0]["no_proxy"] = "old.example.com"
+    t.save_config(t.CFG)
+    proxies = t.settings_state()["config"]["proxies"]
+    proxies[0]["no_proxy"] = value
+    assert _save(t, {"proxies": proxies}) == "ok"
+    saved = dict(PROXIES[0])
+    if expected is not None:
+        saved["no_proxy"] = expected
+    assert t.CFG["proxies"] == [saved, PROXIES[1]]
+    assert t.load_config()["proxies"] == [saved, PROXIES[1]]
 
 
 def test_settings_save_keeps_pi_and_omp_launch_options(t):

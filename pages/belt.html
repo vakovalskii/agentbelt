@@ -1,0 +1,49 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>agentbelt</title>
+<style>
+/* Windows: the iTerm2 Toolbelt rebuilt as one app window. Same pages, stacked panels with
+   the Toolbelt's grey title bars; a panel collapses on a title click, dividers drag. */
+:root{--bg:#14161a;--fg:#d8dce3;--mut:#7d8590;--line:#2a2f37;--bar:#2b2e33}
+*{box-sizing:border-box}html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);
+  font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI","SF Mono",Menlo,"Cascadia Mono",Consolas,monospace;overflow:hidden}
+#belt{display:flex;flex-direction:column;height:100%}
+.p{display:flex;flex-direction:column;min-height:26px;flex:1 1 0}.p.col{flex:0 0 26px}
+.h{flex:none;height:26px;display:flex;align-items:center;justify-content:center;gap:6px;background:var(--bar);
+  border-top:1px solid #3a3f46;border-bottom:1px solid #1d2024;color:#e6e8eb;font-weight:600;cursor:pointer;user-select:none;position:relative}
+.h .x{position:absolute;left:8px;color:var(--mut);font-weight:400}.h .tw{position:absolute;right:9px;color:var(--mut);font-weight:400}
+iframe{flex:1;border:0;width:100%;background:var(--bg)}.p.col iframe{display:none}
+.dv{flex:none;height:4px;cursor:row-resize;background:#0e1013}.dv:hover{background:#3a3f46}
+</style></head><body><div id="belt"></div>
+<script>
+const ALL=[["git","Git & PR","/"],["agent","Agent actions","/agent"],["sessions","Sessions","/sessions"],["settings","Settings","/settings"]];
+const KEY="agentbelt.belt";
+let saved={};try{saved=JSON.parse(localStorage.getItem(KEY)||"{}")}catch(e){}
+const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(saved))}catch(e){}};
+async function boot(){
+  let tabs={git:true,agent:true,sessions:true,settings:false},pre="◆ ";
+  try{const r=await (await fetch("/settings/state",{cache:"no-store"})).json();tabs=Object.assign(tabs,r.config.tabs||{});pre=r.config.title_prefix??pre}catch(e){}
+  const belt=document.getElementById("belt");
+  const list=ALL.filter(([k])=>tabs[k]);
+  list.forEach(([k,title,path],i)=>{
+    const p=document.createElement("div");p.className="p"+(saved["c:"+k]?" col":"");p.dataset.k=k;
+    if(saved["f:"+k])p.style.flex=saved["f:"+k];
+    p.innerHTML=`<div class="h"><span class="x">✕</span>${pre}${title}<span class="tw">⋯</span></div><iframe src="${path}" title="${title}"></iframe>`;
+    p.querySelector(".h").onclick=()=>{p.classList.toggle("col");saved["c:"+k]=p.classList.contains("col");save()};
+    belt.appendChild(p);
+    if(i<list.length-1){const d=document.createElement("div");d.className="dv";belt.appendChild(d);drag(d)}
+  });
+}
+function drag(d){
+  d.onmousedown=e=>{
+    e.preventDefault();const a=d.previousElementSibling,b=d.nextElementSibling;
+    const ha=a.getBoundingClientRect().height,hb=b.getBoundingClientRect().height,y0=e.clientY;
+    document.querySelectorAll("iframe").forEach(f=>f.style.pointerEvents="none");
+    const mv=ev=>{const dy=ev.clientY-y0;const na=Math.max(26,ha+dy),nb=Math.max(26,hb-dy);
+      a.style.flex=`${na} 1 0`;b.style.flex=`${nb} 1 0`};
+    const up=()=>{removeEventListener("mousemove",mv);removeEventListener("mouseup",up);
+      document.querySelectorAll("iframe").forEach(f=>f.style.pointerEvents="");
+      saved["f:"+a.dataset.k]=a.style.flex;saved["f:"+b.dataset.k]=b.style.flex;save()};
+    addEventListener("mousemove",mv);addEventListener("mouseup",up)};
+}
+boot();
+</script></body></html>

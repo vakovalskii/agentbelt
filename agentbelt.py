@@ -9,6 +9,8 @@ Tabs (View → Toolbelt):
 
 Pages are served by an HTTP server on 127.0.0.1 (port from the config) and shown by iTerm2
 in Toolbelt tabs. Everything iTerm-related (active pane, new windows) goes through its Python API.
+On Windows the same pages are stacked in one app window (/belt) next to WezTerm, and panes,
+tabs and windows go through `wezterm cli` (wezterm_term.py).
 Config: ~/.config/agentbelt/config.json.
 """
 import asyncio
@@ -23,7 +25,15 @@ import threading
 import time
 import urllib.parse
 
-import iterm2
+# macOS: iTerm2 Python API. Windows: WezTerm via its CLI (wezterm_term.py), same pages.
+IS_WIN = sys.platform == "win32"
+# a console program started from pythonw opens its own console window unless told not to
+NO_WINDOW = {"creationflags": 0x08000000} if IS_WIN else {}
+if IS_WIN:
+    iterm2 = None
+    import wezterm_term as wez
+else:
+    import iterm2
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_DIR = os.path.expanduser(os.getenv("AGENTBELT_HOME") or os.getenv("ITERM_TOOLBELT_HOME") or "~/.config/agentbelt")
@@ -114,7 +124,9 @@ async def run(cmd: list[str], cwd: str | None = None, timeout: float = 10.0) -> 
     try:
         p = await asyncio.create_subprocess_exec(
             *cmd, cwd=cwd, env=NOPROXY_ENV,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+            # a background process on Windows would flash a console window per command
+            **NO_WINDOW)
         out, _ = await asyncio.wait_for(p.communicate(), timeout)
         return p.returncode or 0, ANSI.sub("", out.decode("utf-8", "replace"))
     except asyncio.TimeoutError:
@@ -888,6 +900,8 @@ def _same_dir(left: str, right: str) -> bool:
 
 async def _active_agents() -> list:
     """Running Claude (session metadata), Codex and Pi (processes)."""
+    if IS_WIN:
+        return await asyncio.to_thread(wez.active_agents, CLAUDE_DIR)
     _, ps = await run(["ps", "-xo", "pid=,tty=,stat=,command="], timeout=5)
     ttys, stopped = {}, set()
     for line in ps.splitlines():
@@ -945,23 +959,34 @@ async def sessions_state() -> dict:
 NO_PROXY_PREFIX = "env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy -u ALL_PROXY -u all_proxy"
 
 
+WIN_NO_PROXY = ("Remove-Item Env:HTTPS_PROXY, Env:HTTP_PROXY, Env:ALL_PROXY "
+                "-ErrorAction SilentlyContinue;")
+
+
 def proxy_prefix(name: str) -> str | None:
-    """Env prefix that runs a command through a proxy from the local config ("direct" = none)."""
+    """Env prefix that runs a command through a proxy from the local config ("direct" = none).
+    Windows runs commands in PowerShell, so the prefix sets $env: variables instead."""
     if name == "direct":
-        return NO_PROXY_PREFIX
+        return WIN_NO_PROXY if IS_WIN else NO_PROXY_PREFIX
     url = next((p["url"] for p in CFG.get("proxies") or [] if p.get("url") and p.get("name") == name), None)
     if not url:
         return None
+    if IS_WIN:
+        q = wez.ps_quote(url)
+        return f"$env:HTTPS_PROXY={q}; $env:HTTP_PROXY={q};"
     q = shlex.quote(url)
     return f"HTTPS_PROXY={q} HTTP_PROXY={q}"
 
 
 def proxy_export(name: str) -> str | None:
-    """Line to paste into a shell: route this shell through the proxy (or drop the proxy)."""
+    """Line to paste into a shell: route this shell through the proxy (or drop the proxy).
+    Only HTTPS_PROXY: the agents talk https, and a second copy of the URL reads like a doubled paste."""
     if name == "direct":
-        return "unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy ALL_PROXY all_proxy"
-    p = proxy_prefix(name)
-    return p and "export " + p
+        return WIN_NO_PROXY if IS_WIN else "unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy ALL_PROXY all_proxy"
+    url = next((p["url"] for p in CFG.get("proxies") or [] if p.get("url") and p.get("name") == name), None)
+    if not url:
+        return None
+    return f"$env:HTTPS_PROXY={wez.ps_quote(url)}" if IS_WIN else "export HTTPS_PROXY=" + shlex.quote(url)
 
 
 def agent_command(tool: str, sid: str, skip: bool, proxy: str = "") -> str | None:
@@ -1010,6 +1035,8 @@ async def open_agent(q: dict) -> str:
         return f"cannot launch {tool}" + (f" via {q['proxy']}" if q.get("proxy") else "")
     if d and not os.path.isdir(d):
         return f"no such directory: {d}"
+    if IS_WIN:
+        return await wez.spawn(d, cmd, new_window=q.get("where") != "tab")
     conn = CONN.get("c")
     if conn is None:
         return "no connection to iTerm"
@@ -1169,8 +1196,11 @@ def _write_snap(name: str, tabs: list):
 async def snap_save(name: str, only_current: bool = False) -> str:
     if not SAFE_SNAP.match(name or ""):
         return "name: letters, digits, space, . : - up to 60 chars"
-    app = await iterm2.async_get_app(CONN["c"])
-    tabs = await capture_windows(app, only_current)
+    if IS_WIN:
+        tabs = await win_capture(only_current)
+    else:
+        app = await iterm2.async_get_app(CONN["c"])
+        tabs = await capture_windows(app, only_current)
     if not tabs:
         return "nothing to save: no windows with directories"
     _write_snap(name, tabs)
@@ -1187,8 +1217,11 @@ async def autosave_loop(app):
         if not CFG.get("autosave", True):
             continue
         try:
-            await app.async_refresh()
-            tabs = await capture_windows(app)
+            if IS_WIN:
+                tabs = await win_capture(False)
+            else:
+                await app.async_refresh()
+                tabs = await capture_windows(app)
         except Exception:  # noqa: BLE001
             continue
         if not any(p.get("session_id") for t in tabs for p in t["panes"]):
@@ -1229,6 +1262,8 @@ async def snap_restore(name: str, skip: bool) -> str:
             tabs = json.load(f)
     except (OSError, ValueError):
         return "no such snapshot"
+    if IS_WIN:
+        return await win_restore(tabs, skip)
     conn = CONN["c"]
     app = await iterm2.async_get_app(conn)
     # the TermDeck profile (if present) keeps claude from overwriting tab names
@@ -1416,9 +1451,9 @@ async def _curl(proxy: str, url: str) -> dict:
     p = None
     try:
         p = await asyncio.create_subprocess_exec(
-            "curl", "-s", "-o", "/dev/null", "-m", "8", "-w", "%{http_code} %{time_total}", "-K", "-",
+            "curl", "-s", "-o", os.devnull, "-m", "8", "-w", "%{http_code} %{time_total}", "-K", "-",
             env=NOPROXY_ENV, stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, **NO_WINDOW)
         out, _ = await asyncio.wait_for(p.communicate(conf.encode()), 12)
         code, t = (out.decode().split() + ["0", "0"])[:2]
         return {"code": int(code), "ms": round(float(t) * 1000)}
@@ -1564,7 +1599,8 @@ async def net_state() -> dict:
 
 # ─────────────── HTTP ───────────────
 
-PAGES = {"/": "git.html", "/agent": "agent.html", "/sessions": "sessions.html", "/settings": "settings.html"}
+PAGES = {"/": "git.html", "/agent": "agent.html", "/sessions": "sessions.html", "/settings": "settings.html",
+         "/belt": "belt.html"}
 
 
 def page(name: str) -> bytes:
@@ -1619,7 +1655,7 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
                     or re.search(r"[\x00-\x20\x7f]", url)):
                 out, status = b"invalid URL", b"400 Bad Request"
             else:
-                rc, res = await run(["/usr/bin/open", url])
+                rc, res = await run(["cmd", "/c", "start", "", url] if IS_WIN else ["/usr/bin/open", url])
                 out = b"ok" if rc == 0 else ("could not open URL: " + res.strip()).encode()
                 if rc:
                     status = b"502 Bad Gateway"
@@ -1627,7 +1663,7 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
             # the line carries the proxy password: it goes straight to the clipboard, never to the page
             line = proxy_export(qs.get("name", ""))
             if line:
-                p = await asyncio.create_subprocess_exec("pbcopy", stdin=asyncio.subprocess.PIPE)
+                p = await asyncio.create_subprocess_exec("clip" if IS_WIN else "pbcopy", stdin=asyncio.subprocess.PIPE, **NO_WINDOW)
                 # a trailing newline keeps two pastes in a row from gluing into one command
                 await p.communicate((line + "\n").encode())
                 res = "copied"
@@ -1643,7 +1679,10 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
             out, ctype = res.encode(), "text/plain; charset=utf-8"
         elif u.path == "/sessions/focus":
             tty = qs.get("tty", "")
-            res = await focus_tty(tty) if re.fullmatch(r"ttys?\d+", tty) else "bad tty"
+            if IS_WIN:
+                res = await wez.activate(tty) if re.fullmatch(r"wez\d+", tty) else "bad pane"
+            else:
+                res = await focus_tty(tty) if re.fullmatch(r"ttys?\d+", tty) else "bad tty"
             out, ctype = res.encode(), "text/plain; charset=utf-8"
         elif u.path in ("/snaps/save", "/snaps/restore"):
             try:
@@ -1764,8 +1803,81 @@ async def main(connection):
         server.close()
 
 
+# ─────────────── Windows: WezTerm ───────────────
+
+async def win_refresh():
+    """Active pane → STATE, the same fields the iTerm focus monitor fills on macOS."""
+    panes = await wez.list_panes()
+    fid = await wez.focused_pane_id(panes)
+    if fid is None:
+        return
+    pane = next((p for p in panes if p.get("pane_id") == fid), {})
+    agent = await asyncio.to_thread(wez.agent_in_pane, CLAUDE_DIR, fid)
+    STATE["session_id"] = str(fid)
+    STATE["session_name"] = pane.get("title") or ""
+    STATE["tty"] = wez.pane_tag(fid)
+    STATE["agent"] = agent
+    STATE["cwd"] = (agent or {}).get("cwd") or wez.cwd_from_url(pane.get("cwd")) or STATE["cwd"]
+
+
+async def win_capture(only_current: bool) -> list:
+    window = None
+    if only_current:
+        panes = await wez.list_panes()
+        fid = await wez.focused_pane_id(panes)
+        window = next((p.get("window_id") for p in panes if p.get("pane_id") == fid), None)
+    return await wez.capture(CLAUDE_DIR, window)
+
+
+async def win_restore(tabs: list, skip: bool) -> str:
+    """Each saved tab becomes a WezTerm tab in one new window; splits go to the right."""
+    window_args: list[str] = ["--new-window"]
+    for tab in tabs:
+        first = None
+        for pane in tab.get("panes", []):
+            cwd = pane.get("cwd") or ""
+            cwd = cwd if cwd and os.path.isdir(cwd) else ""
+            sid = pane.get("session_id")
+            cmd = agent_command(pane.get("agent") or "claude", sid, skip) if sid and SAFE_ID.match(sid) else ""
+            if first is None:
+                rc, out = await wez.acli("spawn", *window_args, *(["--cwd", cwd] if cwd else []), "--",
+                                         *wez.shell_argv(cmd or ""), timeout=10)
+                if rc != 0 or not out.strip().isdigit():
+                    return f"wezterm: {out.strip()[:200]}"
+                first = int(out.strip())
+                if window_args == ["--new-window"]:
+                    panes = await wez.list_panes()
+                    wid = next((p.get("window_id") for p in panes if p.get("pane_id") == first), None)
+                    window_args = ["--window-id", str(wid)] if wid is not None else []
+            else:
+                await wez.split(first, cwd, cmd or "")
+        if first is not None and tab.get("title"):
+            await wez.set_tab_title(first, tab["title"])
+    return "ok"
+
+
+async def win_main():
+    port = int(CFG.get("port", 47811))
+    server = await asyncio.start_server(handle, "127.0.0.1", port)
+    print(time.strftime("%H:%M:%S"), f"agentbelt on http://127.0.0.1:{port}/belt (WezTerm)", flush=True)
+    autosave = asyncio.create_task(autosave_loop(None))
+    try:
+        while True:
+            try:
+                await win_refresh()
+            except Exception as ex:  # noqa: BLE001
+                print(time.strftime("%H:%M:%S"), "refresh:", type(ex).__name__, ex, flush=True)
+            await asyncio.sleep(1.5)
+    finally:
+        autosave.cancel()
+        server.close()
+
+
 if __name__ == "__main__":
     if "--version" in sys.argv:
         print(VERSION)
         sys.exit(0)
-    iterm2.run_until_complete(main, retry=True)
+    if IS_WIN:
+        asyncio.run(win_main())
+    else:
+        iterm2.run_until_complete(main, retry=True)

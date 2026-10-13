@@ -2,20 +2,20 @@
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Settings</title>
 <style>
 :root{--bg:#14161a;--card:#1a1e24;--fg:#d8dce3;--mut:#7d8590;--line:#2a2f37;--ok:#3fb950;--bad:#f85149;--warn:#d29922;--acc:#58a6ff}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:12px/1.5 -apple-system,BlinkMacSystemFont,"SF Mono",Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:12px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","SF Mono",Menlo,"Cascadia Mono",Consolas,monospace}
 .s{padding:10px;border-bottom:1px solid var(--line);animation:in .2s ease-out}@keyframes in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 h3{margin:0 0 6px;font-size:11px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
 .mut{color:var(--mut)}.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}a{color:var(--acc)}
 label.f{display:block;margin:6px 0 2px;color:var(--mut)}
-input[type=text],input[type=password],textarea{width:100%;background:#0e1013;color:var(--fg);border:1px solid var(--line);border-radius:5px;padding:5px 7px;font:11px/1.4 "SF Mono",Menlo,monospace}
+input[type=text],input[type=password],textarea{width:100%;background:#0e1013;color:var(--fg);border:1px solid var(--line);border-radius:5px;padding:5px 7px;font:11px/1.4 "SF Mono",Menlo,"Cascadia Mono",Consolas,monospace}
 textarea{min-height:110px;resize:vertical}
-select{background:#0e1013;color:var(--fg);border:1px solid var(--line);border-radius:5px;padding:4px 6px;font:11px "SF Mono",Menlo,monospace}
+select{background:#0e1013;color:var(--fg);border:1px solid var(--line);border-radius:5px;padding:4px 6px;font:11px "SF Mono",Menlo,"Cascadia Mono",Consolas,monospace}
 .row{display:flex;gap:6px;align-items:center}.sp{flex:1}
 .chip{cursor:pointer;padding:1px 8px;border-radius:9px;border:1px solid var(--line);color:var(--mut)}.chip.on{color:var(--fg);border-color:var(--acc)}
 button{background:#1f2a3a;color:var(--acc);border:1px solid var(--line);border-radius:5px;padding:4px 12px;cursor:pointer;font:inherit}button:hover{border-color:var(--acc)}button.main{color:var(--ok);border-color:var(--ok)}
 .card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:8px}
 .step{display:flex;gap:8px;margin:6px 0}.num{flex:none;width:18px;height:18px;border-radius:9px;background:#1f2a3a;color:var(--acc);display:flex;align-items:center;justify-content:center;font-size:10px}
-pre{margin:4px 0 0;font:11px/1.35 "SF Mono",Menlo,monospace;white-space:pre-wrap;word-break:break-all;background:#0e1013;padding:6px;border-radius:4px}
+pre{margin:4px 0 0;font:11px/1.35 "SF Mono",Menlo,"Cascadia Mono",Consolas,monospace;white-space:pre-wrap;word-break:break-all;background:#0e1013;padding:6px;border-radius:4px}
 #bar{position:sticky;bottom:0;background:var(--bg);border-top:1px solid var(--line);padding:8px 10px;display:flex;gap:8px;align-items:center}
 </style></head><body><div id="app" class="s mut">loading…</div>
 <div id="bar"><a href="/sessions" style="color:var(--acc);text-decoration:none">← back to sessions</a><button class="main" id="save">Save</button><span id="msg" class="mut"></span></div>
@@ -71,7 +71,7 @@ function render(d){C=d.config;
   h+=`<div class="s" id="network"><h3>Network</h3>
    <div class="mut">Proxies are probed every minute against the API of each agent CLI and get ⧉ export / ▶ claude / ▶ codex in Agent actions. Everything stays in the local config; passwords are masked here and kept as is unless you type a new URL.</div>
    <div class="card"><b>Proxies</b><div id="pxs">${(C.proxies||[]).map(pxRow).join("")}</div><button id="addpx">+ proxy</button></div>
-   <div class="card"><b>Servers</b> <span class="mut">ping and a TCP check from this Mac; untick the banner for non-SSH ports (MTProto, VPN)</span><div id="svs">${(C.servers||[]).map(svRow).join("")}</div><button id="addsv">+ server</button></div>
+   <div class="card"><b>Servers</b> <span class="mut">ping and a TCP check from this ${/Win/.test(navigator.platform)?"PC":"Mac"}; untick the banner for non-SSH ports (MTProto, VPN)</span><div id="svs">${(C.servers||[]).map(svRow).join("")}</div><button id="addsv">+ server</button></div>
    <div class="card"><b>Keenetic router</b> <span class="mut">optional: tunnels and per-domain routes over RCI; empty address turns it off</span>
     <div class="row"><input type="text" id="kn_host" placeholder="192.168.1.1" value="${e(kn.host||"")}" style="width:130px"><input type="text" id="kn_login" placeholder="admin" value="${e(kn.login||"")}" style="width:90px"><input type="password" id="kn_pass" placeholder="${kn.password_set?"password unchanged":"password"}"></div></div></div>`;
   h+=`<div class="s"><h3>Repo checks</h3><div class="mut">Your own lines in the Git &amp; PR tab: if <code>file</code> exists in the repo root, <code>cmd</code> runs; exit 0 is green, anything else red.</div>

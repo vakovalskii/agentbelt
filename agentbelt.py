@@ -979,13 +979,14 @@ def proxy_prefix(name: str) -> str | None:
 
 
 def proxy_export(name: str) -> str | None:
-    """Line to paste into a shell: route this shell through the proxy (or drop the proxy)."""
-    if IS_WIN:
-        return proxy_prefix(name)  # $env: assignments already apply to the current shell
+    """Line to paste into a shell: route this shell through the proxy (or drop the proxy).
+    Only HTTPS_PROXY: the agents talk https, and a second copy of the URL reads like a doubled paste."""
     if name == "direct":
-        return "unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy ALL_PROXY all_proxy"
-    p = proxy_prefix(name)
-    return p and "export " + p
+        return WIN_NO_PROXY if IS_WIN else "unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy ALL_PROXY all_proxy"
+    url = next((p["url"] for p in CFG.get("proxies") or [] if p.get("url") and p.get("name") == name), None)
+    if not url:
+        return None
+    return f"$env:HTTPS_PROXY={wez.ps_quote(url)}" if IS_WIN else "export HTTPS_PROXY=" + shlex.quote(url)
 
 
 def agent_command(tool: str, sid: str, skip: bool, proxy: str = "") -> str | None:

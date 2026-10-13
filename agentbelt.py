@@ -957,11 +957,12 @@ def proxy_prefix(name: str) -> str | None:
 
 
 def proxy_export(name: str) -> str | None:
-    """Line to paste into a shell: route this shell through the proxy (or drop the proxy)."""
+    """Line to paste into a shell: route this shell through the proxy (or drop the proxy).
+    Only HTTPS_PROXY: the agents talk https, and a second copy of the URL reads like a doubled paste."""
     if name == "direct":
         return "unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy ALL_PROXY all_proxy"
-    p = proxy_prefix(name)
-    return p and "export " + p
+    url = next((p["url"] for p in CFG.get("proxies") or [] if p.get("url") and p.get("name") == name), None)
+    return url and "export HTTPS_PROXY=" + shlex.quote(url)
 
 
 def agent_command(tool: str, sid: str, skip: bool, proxy: str = "") -> str | None:

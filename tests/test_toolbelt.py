@@ -504,7 +504,7 @@ def test_proxy_prefix_and_export(t):
                                      "HTTP_PROXY=http://user:s3cret@203.0.113.10:3128"
     assert t.proxy_prefix("direct").startswith("env -u HTTPS_PROXY")
     assert t.proxy_prefix("nope") is None
-    assert t.proxy_export("eu-1").startswith("export HTTPS_PROXY=")
+    assert t.proxy_export("eu-1") == "export HTTPS_PROXY=http://user:s3cret@203.0.113.10:3128"
     assert t.proxy_export("direct").startswith("unset HTTPS_PROXY")
     assert t.proxy_export("nope") is None
 

@@ -514,6 +514,15 @@ def test_proxy_prefix_quotes_shell_characters(t):
     assert "'http://u:p$a;ss@1.2.3.4:1'" in t.proxy_prefix("odd")
 
 
+def test_proxy_prefix_passes_per_proxy_timezone(t):
+    t.CFG["proxies"] = [{"name": "us-1", "url": "http://bob:pa55@198.51.100.7:8080", "tz": "America/New_York"}]
+    assert t.proxy_prefix("us-1").endswith(" TZ=America/New_York")
+    assert t.proxy_export("us-1").endswith(" TZ=America/New_York")
+    t.CFG["proxies"] = [{"name": "us-1", "url": "http://bob:pa55@198.51.100.7:8080"}]
+    assert "TZ=" not in t.proxy_prefix("us-1")
+    assert "TZ=" not in (t.proxy_prefix("direct") or "")
+
+
 def test_agent_command_claude(t):
     t.CFG["agents"]["claude"].update(prefix="FOO=1", flags="--model opus --dangerously-skip-permissions")
     assert t.agent_command("claude", "", False) == "FOO=1 claude --model opus"

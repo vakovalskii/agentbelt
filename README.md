@@ -100,6 +100,12 @@ They run in GitHub Actions on every push (`.github/workflows/tests.yml`); locall
 
 `repo_checks` are your own lines in Git & PR: if `file` exists in the repo root, `cmd` runs; exit code 0 is shown green, anything else red.
 
+Each entry in `proxies` can also set an optional `no_proxy` string of comma-separated hosts/domains,
+for example `"no_proxy": "github.com,.github.com,.githubusercontent.com"` (see `config.example.json`).
+Edit it in ⚙ → Network or in the config file. Agent launches using that proxy and **⧉ export** set both
+`NO_PROXY` and `no_proxy`, so clients that support these variables connect directly to matching hosts.
+If the field is empty or omitted, the existing proxy command is unchanged and inherited exclusions are kept.
+
 ## What iTerm2 already has
 
 iTerm2 3.7 ships its own Claude Code integration: the Session Status tool, the Cockpit window, Workgroups with diff and review, and Codex support in 3.7.4 beta. agentbelt complements it with a Claude Code action feed, a browser for resuming Claude Code, Codex, pi and omp sessions, window snapshots with agent resume, and git/PR for the active pane.

@@ -33,7 +33,7 @@ function preview(){const a=C.agents.claude, x=C.agents.codex;
   document.getElementById("pv").textContent=maskUrl("cd <dir> && "+[cl,cx,...other].join("\ncd <dir> && "))}
 function pick(id,cur){const names=["direct",...(C.proxies||[]).map(p=>p.name)];
   return `<select id="${id}"><option value="">— use the prefix above —</option>${names.map(n=>`<option ${n===cur?"selected":""}>${e(n)}</option>`).join("")}</select>`}
-const pxRow=p=>`<div class="row px" data-orig="${e(p.name||"")}" style="margin-top:4px"><input type="text" class="pn" placeholder="name" value="${e(p.name||"")}" style="width:110px"><input type="text" class="pu" placeholder="http://user:pass@host:port" value="${e(p.url||"")}"><span class="chip del" title="remove">✕</span></div>`;
+const pxRow=p=>`<div class="px" data-orig="${e(p.name||"")}" style="margin-top:4px"><div class="row"><input type="text" class="pn" placeholder="name" value="${e(p.name||"")}" style="width:110px"><input type="text" class="pu" placeholder="http://user:pass@host:port" value="${e(p.url||"")}"><span class="chip del" title="remove">✕</span></div><label class="f">Bypass proxy (comma-separated domains)<input type="text" class="pnp" placeholder="github.com,.github.com" value="${e(p.no_proxy||"")}"></label></div>`;
 const svRow=s=>`<div class="row sv" style="margin-top:4px"><input type="text" class="sn" placeholder="name" value="${e(s.name||"")}" style="width:110px"><input type="text" class="sh" placeholder="host" value="${e(s.host||"")}"><input type="text" class="sp2" placeholder="22" value="${e(s.port||"")}" style="width:56px"><label class="row mut" title="read the SSH banner"><input type="checkbox" class="sb" ${s.banner===false?"":"checked"}>banner</label><span class="chip del" title="remove">✕</span></div>`;
 function render(d){C=d.config;
   let h="";
@@ -86,7 +86,7 @@ function render(d){C=d.config;
   document.querySelectorAll("[data-w]").forEach(n=>n.onclick=()=>{C.open_in=n.dataset.w;document.querySelectorAll("[data-w]").forEach(m=>m.classList.toggle("on",m===n))});
   $("addpx").onclick=()=>$("pxs").insertAdjacentHTML("beforeend",pxRow({}));
   $("addsv").onclick=()=>$("svs").insertAdjacentHTML("beforeend",svRow({}));
-  document.getElementById("network").addEventListener("click",ev=>{if(ev.target.classList.contains("del"))ev.target.closest(".row").remove()});
+  document.getElementById("network").addEventListener("click",ev=>{if(ev.target.classList.contains("del"))ev.target.closest(".px,.sv").remove()});
   ["cl_proxy","cx_proxy",...EXTRA_AGENTS.map(([key])=>`${key}_proxy`)].forEach(id=>$(id).onchange=()=>{collect();preview()});
   if($("done"))$("done").onclick=async()=>{C.onboarded=true;await save(true);document.getElementById("agents").scrollIntoView({behavior:"smooth"})};
   preview();
@@ -102,7 +102,7 @@ async function save(quiet){const $=id=>document.getElementById(id);const msg=$("
   document.querySelectorAll("[data-t]").forEach(n=>C.tabs[n.dataset.t]=n.checked);
   C.title_prefix=$("prefix").value;C.auto_show_toolbelt=$("autoshow").checked;C.autosave=$("autosave").checked;
   let checks;try{checks=JSON.parse($("checks").value||"[]");if(!Array.isArray(checks))throw 0}catch(_){msg.innerHTML='<span class="bad">checks: a JSON array is required</span>';return}
-  const proxies=[...document.querySelectorAll(".px")].map(r=>({orig:r.dataset.orig,name:r.querySelector(".pn").value.trim(),url:r.querySelector(".pu").value.trim()}));
+  const proxies=[...document.querySelectorAll(".px")].map(r=>({orig:r.dataset.orig,name:r.querySelector(".pn").value.trim(),url:r.querySelector(".pu").value.trim(),no_proxy:r.querySelector(".pnp").value.trim()}));
   const servers=[...document.querySelectorAll(".sv")].map(r=>({name:r.querySelector(".sn").value.trim(),host:r.querySelector(".sh").value.trim(),port:r.querySelector(".sp2").value.trim()||22,banner:r.querySelector(".sb").checked?undefined:false}));
   const keenetic={host:$("kn_host").value.trim(),login:$("kn_login").value.trim(),password:$("kn_pass").value};
   const body={autosave:C.autosave,auto_show_toolbelt:C.auto_show_toolbelt,open_in:C.open_in,title_prefix:C.title_prefix,onboarded:C.onboarded,agents:C.agents,tabs:C.tabs,repo_checks:checks,proxies,servers,keenetic};

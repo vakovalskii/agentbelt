@@ -508,7 +508,7 @@ def test_proxy_prefix_and_export(t, no_proxy):
     assert t.proxy_prefix("eu-1") == expected
     assert t.proxy_prefix("direct").startswith("env -u HTTPS_PROXY")
     assert t.proxy_prefix("nope") is None
-    assert t.proxy_export("eu-1") == "export " + expected
+    assert t.proxy_export("eu-1") == "export HTTPS_PROXY=http://user:s3cret@203.0.113.10:3128"
     assert t.proxy_export("direct").startswith("unset HTTPS_PROXY")
     assert t.proxy_export("nope") is None
 
@@ -525,7 +525,8 @@ def test_proxy_prefix_and_export_with_no_proxy(t):
                "HTTP_PROXY=http://user:s3cret@203.0.113.10:3128 " \
                f"NO_PROXY={no_proxy} no_proxy={no_proxy}"
     assert t.proxy_prefix("eu-1") == expected
-    assert t.proxy_export("eu-1") == "export " + expected
+    assert t.proxy_export("eu-1") == "export HTTPS_PROXY=http://user:s3cret@203.0.113.10:3128 " \
+                                     f"NO_PROXY={no_proxy} no_proxy={no_proxy}"
     assert "NO_PROXY=" not in t.proxy_prefix("us-1")
 
 

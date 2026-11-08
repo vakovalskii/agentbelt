@@ -75,11 +75,11 @@ async function net(){try{const d=await (await fetch("/net/state")).json();const 
       for(const s of pr.servers){const st=(s.banner||(s.nobanner&&s.tcp!==null))?"ok":s.tcp!==null?"warn":"bad";
         h+=`<tr><td class="n" title="${e(s.host)}:${s.port}"><span class="${st}">●</span> ${e(s.name)}</td><td>${s.ping!==null?s.ping+"ms":'<span class="mut">—</span>'}</td><td class="${st}">${(s.banner||s.nobanner)&&s.tcp!==null?s.tcp+"ms":s.tcp!==null?"open, no banner":"closed"}</td></tr>`}
       h+=`</table>`}
-    h+=`<div class="mut"><label title="claude -w: start the new claude session in its own git worktree" style="display:inline-flex;gap:4px;align-items:center;cursor:pointer"><input type="checkbox" id="abwt" ${localStorage.getItem("abwt")==="1"?"checked":""}> worktree</label> · checked ${new Date(pr.at*1000).toLocaleTimeString("ru-RU")}, from this Mac · <a href="/settings#network" style="color:var(--acc);text-decoration:none">✎ edit proxies and servers</a></div>`;
-    const cb=document.getElementById("abwt");if(cb)cb.onchange=ev=>{try{localStorage.setItem("abwt",ev.target.checked?"1":"0")}catch(_){}}}
+    h+=`<div class="mut"><label title="claude -w: start the new claude session in its own git worktree" style="display:inline-flex;gap:4px;align-items:center;cursor:pointer"><input type="checkbox" id="abwt" ${localStorage.getItem("abwt")==="1"?"checked":""}> worktree</label> · checked ${new Date(pr.at*1000).toLocaleTimeString("ru-RU")}, from this Mac · <a href="/settings#network" style="color:var(--acc);text-decoration:none">✎ edit proxies and servers</a></div>`}
   nd.querySelector("summary").innerHTML=sum;document.getElementById("netb").innerHTML=h}catch(_){}}
 net();setInterval(net,5000);
 // proxy actions: the export line (with the password) is put on the clipboard by the service, not shown here
+document.getElementById("netb").addEventListener("change",ev=>{if(ev.target&&ev.target.id==="abwt"){try{localStorage.setItem("abwt",ev.target.checked?"1":"0")}catch(_){}}});
 document.getElementById("netb").addEventListener("click",async ev=>{const t=ev.target.closest(".lnk");if(!t)return;
   const copy=t.dataset.copy,run=t.dataset.run,old=t.textContent;t.textContent="…";
   try{const r=await (await fetch((copy?"/net/copy?":"/sessions/open?")+new URLSearchParams(copy?{name:copy}:{tool:t.dataset.tool||"claude",proxy:run,...(t.dataset.tool==="claude"&&localStorage.getItem("abwt")==="1"?{wt:"1"}:{})}),

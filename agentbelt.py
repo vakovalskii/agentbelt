@@ -965,9 +965,10 @@ def proxy_export(name: str) -> str | None:
     return url and "export HTTPS_PROXY=" + shlex.quote(url)
 
 
-def agent_command(tool: str, sid: str, skip: bool, proxy: str = "") -> str | None:
+def agent_command(tool: str, sid: str, skip: bool, proxy: str = "", worktree: bool = False) -> str | None:
     """Empty sid = new session. Prefix (e.g. HTTPS_PROXY=...) and flags come from the config;
-    `proxy` (a name from the config, or "direct") replaces the configured prefix."""
+    `proxy` (a name from the config, or "direct") replaces the configured prefix.
+    `worktree` adds `-w` to a new claude session (ignored for resume and other tools)."""
     q = shlex.quote(sid) if sid else ""
     a = dict(CFG["agents"].get("claude" if tool in ("claude", "claude-ext") else tool, {}))
     proxy = proxy or a.get("proxy") or ""
@@ -980,6 +981,8 @@ def agent_command(tool: str, sid: str, skip: bool, proxy: str = "") -> str | Non
         flags = (a.get("flags") or "").replace("--dangerously-skip-permissions", "").strip()
         if skip:
             flags = (flags + " --dangerously-skip-permissions").strip()
+        if worktree and not sid:
+            flags = (flags + " -w").strip()
         core = f"claude --resume {q}" if sid else "claude"
     elif tool == "codex":
         flags = a.get("flags") or ""
@@ -1006,7 +1009,7 @@ async def open_agent(q: dict) -> str:
         d = d or STATE["cwd"] or ""
         q.setdefault("skip", "1" if CFG["agents"]["claude"].get("skip_permissions") else "0")
         q.setdefault("where", CFG.get("open_in", "window"))
-    cmd = agent_command(tool, sid, q.get("skip") == "1", q.get("proxy", ""))
+    cmd = agent_command(tool, sid, q.get("skip") == "1", q.get("proxy", ""), q.get("wt") == "1")
     if not cmd:
         return f"cannot launch {tool}" + (f" via {q['proxy']}" if q.get("proxy") else "")
     if d and not os.path.isdir(d):

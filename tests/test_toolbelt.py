@@ -521,6 +521,14 @@ def test_agent_command_claude(t):
     # a proxy from the list replaces the prefix
     cmd = t.agent_command("claude", "", True, "us-1")
     assert cmd.startswith("HTTPS_PROXY=http://bob:pa55@198.51.100.7:8080") and "FOO=1" not in cmd
+
+
+def test_agent_command_worktree_flag(t):
+    # new claude session with the worktree checkbox: -w lands after the command
+    assert t.agent_command("claude", "", False, "", True) == "claude -w"
+    # resume ignores the checkbox, and so do other tools
+    assert t.agent_command("claude", "abc", False, "", True) == "claude --resume abc"
+    assert t.agent_command("codex", "", False, "", True) == "codex"
     assert t.agent_command("claude", "", True, "missing") is None
 
 

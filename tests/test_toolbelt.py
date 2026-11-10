@@ -169,6 +169,25 @@ def test_scan_claude_skips_commands_and_prefers_ai_title(t):
     assert t._scan_claude(p)["title"] == "Login page fix"
 
 
+def test_scan_claude_title_from_head_of_long_session(t):
+    # ai-title is written at the very start; long sessions push it out of the 64 KB tail
+    p = _claude_session(t, "long", "/w/repo", [
+        {"type": "ai-title", "aiTitle": "План доклада", "sessionId": "long"},
+        {"type": "user", "cwd": "/w/repo", "message": {"content": "у меня есть идея упаковать всю теорию"}},
+    ])
+    _jl(p, [{"type": "user", "cwd": "/w/repo", "message": {"content": "x" * 200}} for _ in range(900)], "a")
+    assert t._scan_claude(p)["title"] == "План доклада"
+
+
+def test_scan_claude_first_message_without_cwd_marker(t):
+    # real transcripts carry cwd deep inside long lines, not per user message
+    p = _claude_session(t, "nocwd", "/w/repo", [
+        {"cwd": "/w/repo"},
+        {"type": "user", "message": {"role": "user", "content": "Помоги с рефакторингом"}},
+    ])
+    assert t._scan_claude(p)["title"] == "Помоги с рефакторингом"
+
+
 def test_scan_codex(t, tmp_path):
     p = tmp_path / "rollout.jsonl"
     _jl(p, [{"type": "session_meta", "payload": {"id": "cx-1", "cwd": "/w/r"}},

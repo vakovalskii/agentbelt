@@ -678,18 +678,24 @@ def _last_pi_name(path: str) -> str | None:
 
 def _scan_claude(path: str) -> dict | None:
     sid = os.path.basename(path)[:-6]
-    cwd, first = "", ""
-    for d in _read_head(path, need=(b'"cwd"',)):
+    cwd, first, head_title = "", "", ""
+    for d in _read_head(path, need=(b'"cwd"', b'"aiTitle"', b'"summary"', b'"custom-title"', b'"user"')):
         cwd = cwd or d.get("cwd") or ""
+        if not head_title and d.get("type") in ("ai-title", "summary", "custom-title"):
+            t = d.get("aiTitle") or d.get("summary") or d.get("customTitle") or d.get("title")
+            if isinstance(t, str) and t.strip():
+                head_title = t.strip()
         if not first and d.get("type") == "user" and not d.get("isMeta"):
             t = _first_text((d.get("message") or {}).get("content"))
             if t and not t.lstrip().startswith(("<command-", "<local-command", "Caveat:")):
                 first = t
-        if cwd and first:
+        if cwd and first and head_title:
             break
     if not cwd:
         return None
-    return {"id": sid, "tool": "claude", "dir": cwd, "title": _clean_title(_tail_title(path) or first)}
+    # a late rename in the tail wins, then the name from the head, then the first message
+    return {"id": sid, "tool": "claude", "dir": cwd,
+            "title": _clean_title(_tail_title(path) or head_title or first)}
 
 
 def _scan_codex(path: str) -> dict | None:

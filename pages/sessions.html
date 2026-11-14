@@ -33,8 +33,8 @@ button{background:#1f2a3a;color:var(--acc);border:1px solid var(--line);border-r
 </style></head><body>
 <div id="top"></div><div id="main"></div><div id="toast"></div>
 <script>
-let D=null, V=null, nav=[{s:"start"}], q="", skip=true, where="window", lastKey=null, dir="fwd";
-let localPref=false;try{localPref=localStorage.getItem("skip")!==null;skip=localStorage.getItem("skip")!=="0";where=localStorage.getItem("where")||"";const n=JSON.parse(localStorage.getItem("nav")||"null");if(Array.isArray(n)&&n.length)nav=n}catch(_){}
+let D=null, V=null, nav=[{s:"start"}], q="", skip=true, where="window", wt=false, lastKey=null, dir="fwd";
+let localPref=false;try{localPref=localStorage.getItem("skip")!==null;skip=localStorage.getItem("skip")!=="0";where=localStorage.getItem("where")||"";wt=localStorage.getItem("wt")==="1";const n=JSON.parse(localStorage.getItem("nav")||"null");if(Array.isArray(n)&&n.length)nav=n}catch(_){}
 const e=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const ago=ms=>{if(!ms)return "";const s=(Date.now()-ms)/1000;if(s<90)return "now";if(s<3600)return Math.round(s/60)+"m";if(s<86400)return Math.round(s/3600)+"h";return Math.round(s/86400)+"d"};
 const base=p=>(p||"").split("/").filter(Boolean).pop()||p||"?";
@@ -48,7 +48,7 @@ function save(){try{localStorage.setItem("nav",JSON.stringify(nav))}catch(_){}}
 function toast(t){const n=document.getElementById("toast");n.textContent=t;n.classList.add("on");setTimeout(()=>n.classList.remove("on"),2200)}
 async function post(path,params){const r=await fetch(path+"?"+new URLSearchParams(params),{method:"POST",headers:{"X-Toolbelt":"1"}});return r.text()}
 async function launch(tool,id,dirp,btn){if(btn){btn.disabled=true;btn.textContent="…"}
-  const t=await post("/sessions/open",{tool,id:id||"",dir:dirp||"",skip:skip?"1":"0",where});
+  const t=await post("/sessions/open",{tool,id:id||"",dir:dirp||"",skip:skip?"1":"0",wt:wt?"1":"0",where});
   toast(t==="ok"?(id?"session opened":"new session started"):t);if(btn){btn.disabled=false;btn.textContent=id?"Resume":"＋ new"}}
 async function focusTty(tty){const t=await post("/sessions/focus",{tty});toast(t==="ok"?"switched":t)}
 function projects(tool){const m={};for(const r of D.rows){if(r.tool!==tool||!r.dir)continue;const p=m[r.dir]||(m[r.dir]={dir:r.dir,n:0,last:0,live:0});p.n++;p.last=Math.max(p.last,r.last);if(r.live)p.live++}
@@ -56,13 +56,14 @@ function projects(tool){const m={};for(const r of D.rows){if(r.tool!==tool||!r.d
 function topbar(){const c=cur();const act=D.active.length;
   let h=`<div class="nav">${nav.length>1?'<span class="back" title="back">←</span>':""}<b>${e(c.s==="start"?"Sessions":c.s==="active"?"Running":c.s==="snaps"?"Window snapshots":c.s==="projects"?AGENTS[c.tool]:base(c.dir))}</b><span class="sp"></span>
   <div class="tabs"><span class="tab ${c.s!=="active"&&c.s!=="snaps"?"on":""}" data-h="start">agents</span><span class="tab ${c.s==="active"?"on":""}" data-h="active">running ${act}</span><span class="tab ${c.s==="snaps"?"on":""}" data-h="snaps">snapshots</span></div></div>
-  <div class="opts">open in: <span class="opt ${where==="window"?"on":""}" data-w="window">window</span><span class="opt ${where==="tab"?"on":""}" data-w="tab">tab</span><span class="sp"></span><label><input type="checkbox" id="skip" ${skip?"checked":""}> Claude skip-permissions</label><a href="/settings#agents" title="agent proxy and flags" style="color:var(--acc);text-decoration:none">⚙ proxy</a></div>`;
+  <div class="opts">open in: <span class="opt ${where==="window"?"on":""}" data-w="window">window</span><span class="opt ${where==="tab"?"on":""}" data-w="tab">tab</span><span class="sp"></span><label title="claude -w: start each new claude session in its own git worktree"><input type="checkbox" id="wt" ${wt?"checked":""}> worktree</label><label><input type="checkbox" id="skip" ${skip?"checked":""}> Claude skip-permissions</label><a href="/settings#agents" title="agent proxy and flags" style="color:var(--acc);text-decoration:none">⚙ proxy</a></div>`;
   if(c.s==="projects"||c.s==="project")h+=`<input id="q" type="search" placeholder="${c.s==="projects"?"project or session text…":"search this project's sessions…"}" value="${e(q)}">`;
   const T=document.getElementById("top");if(T.dataset.h===h)return;T.dataset.h=h;T.innerHTML=h;
   T.querySelector(".back")?.addEventListener("click",back);
   T.querySelectorAll("[data-h]").forEach(n=>n.onclick=()=>{q="";home(n.dataset.h);if(n.dataset.h==="snaps")loadSnaps(true)});
   T.querySelectorAll("[data-w]").forEach(n=>n.onclick=()=>{where=n.dataset.w;try{localStorage.setItem("where",where)}catch(_){};topbar()});
   T.querySelector("#skip").onchange=ev=>{skip=ev.target.checked;localPref=true;try{localStorage.setItem("skip",skip?"1":"0")}catch(_){}};
+  T.querySelector("#wt").onchange=ev=>{wt=ev.target.checked;try{localStorage.setItem("wt",wt?"1":"0")}catch(_){}};
   const qi=T.querySelector("#q");if(qi){qi.oninput=ev=>{q=ev.target.value;body()};}
 }
 function body(){const c=cur();let h="";

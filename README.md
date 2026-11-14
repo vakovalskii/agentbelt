@@ -83,6 +83,8 @@ They run in GitHub Actions on every push (`.github/workflows/tests.yml`); locall
 
 `~/.config/agentbelt/config.json` (mode 600, it may hold a proxy with a password). Everything is editable on the ⚙ page in Sessions (proxies, servers and the router in the **Network** section), or by hand, see `config.example.json`. The config is yours alone and never goes into the repo.
 
+A proxy entry may carry an optional `"tz"` — an IANA time zone such as `America/New_York`. Launches and the ⧉ export line through that proxy then set `TZ` too, so the agent's local time always follows the proxy's exit point; `direct` keeps the machine's own time zone.
+
 ```json
 {
   "agents": {

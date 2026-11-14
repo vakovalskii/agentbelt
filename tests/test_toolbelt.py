@@ -169,6 +169,25 @@ def test_scan_claude_skips_commands_and_prefers_ai_title(t):
     assert t._scan_claude(p)["title"] == "Login page fix"
 
 
+def test_scan_claude_title_from_head_of_long_session(t):
+    # ai-title is written at the very start; long sessions push it out of the 64 KB tail
+    p = _claude_session(t, "long", "/w/repo", [
+        {"type": "ai-title", "aiTitle": "План доклада", "sessionId": "long"},
+        {"type": "user", "cwd": "/w/repo", "message": {"content": "у меня есть идея упаковать всю теорию"}},
+    ])
+    _jl(p, [{"type": "user", "cwd": "/w/repo", "message": {"content": "x" * 200}} for _ in range(900)], "a")
+    assert t._scan_claude(p)["title"] == "План доклада"
+
+
+def test_scan_claude_first_message_without_cwd_marker(t):
+    # real transcripts carry cwd deep inside long lines, not per user message
+    p = _claude_session(t, "nocwd", "/w/repo", [
+        {"cwd": "/w/repo"},
+        {"type": "user", "message": {"role": "user", "content": "Помоги с рефакторингом"}},
+    ])
+    assert t._scan_claude(p)["title"] == "Помоги с рефакторингом"
+
+
 def test_scan_codex(t, tmp_path):
     p = tmp_path / "rollout.jsonl"
     _jl(p, [{"type": "session_meta", "payload": {"id": "cx-1", "cwd": "/w/r"}},
@@ -552,6 +571,15 @@ def test_agent_command_passes_proxy_exclusions(t, tool, default_proxy):
     assert f"NO_PROXY={no_proxy} no_proxy={no_proxy} {tool} " in command
 
 
+def test_proxy_prefix_passes_per_proxy_timezone(t):
+    t.CFG["proxies"] = [{"name": "us-1", "url": "http://bob:pa55@198.51.100.7:8080", "tz": "America/New_York"}]
+    assert t.proxy_prefix("us-1").endswith(" TZ=America/New_York")
+    assert t.proxy_export("us-1").endswith(" TZ=America/New_York")
+    t.CFG["proxies"] = [{"name": "us-1", "url": "http://bob:pa55@198.51.100.7:8080"}]
+    assert "TZ=" not in t.proxy_prefix("us-1")
+    assert "TZ=" not in (t.proxy_prefix("direct") or "")
+
+
 def test_agent_command_claude(t):
     t.CFG["agents"]["claude"].update(prefix="FOO=1", flags="--model opus --dangerously-skip-permissions")
     assert t.agent_command("claude", "", False) == "FOO=1 claude --model opus"
@@ -559,6 +587,14 @@ def test_agent_command_claude(t):
     # a proxy from the list replaces the prefix
     cmd = t.agent_command("claude", "", True, "us-1")
     assert cmd.startswith("HTTPS_PROXY=http://bob:pa55@198.51.100.7:8080") and "FOO=1" not in cmd
+
+
+def test_agent_command_worktree_flag(t):
+    # new claude session with the worktree checkbox: -w lands after the command
+    assert t.agent_command("claude", "", False, "", True) == "claude -w"
+    # resume ignores the checkbox, and so do other tools
+    assert t.agent_command("claude", "abc", False, "", True) == "claude --resume abc"
+    assert t.agent_command("codex", "", False, "", True) == "codex"
     assert t.agent_command("claude", "", True, "missing") is None
 
 
@@ -1118,3 +1154,14 @@ def test_page_scripts_parse(page, tmp_path):
         f.write_text(js)
         r = subprocess.run(["node", "--check", str(f)], capture_output=True, text=True)
         assert r.returncode == 0, r.stderr
+
+
+def test_settings_save_keeps_proxy_timezone(t):
+    t.CFG["proxies"][0]["tz"] = "Asia/Almaty"
+    t.save_config(t.CFG)
+    proxies = [dict(p, orig=p["name"]) for p in t.settings_state()["config"]["proxies"]]
+    for p in proxies:
+        p.pop("tz", None)
+    assert _save(t, {"proxies": proxies}) == "ok"
+    assert t.CFG["proxies"][0]["tz"] == "Asia/Almaty"
+    assert "tz" not in t.CFG["proxies"][1]

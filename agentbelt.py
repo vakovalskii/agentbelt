@@ -678,18 +678,24 @@ def _last_pi_name(path: str) -> str | None:
 
 def _scan_claude(path: str) -> dict | None:
     sid = os.path.basename(path)[:-6]
-    cwd, first = "", ""
-    for d in _read_head(path, need=(b'"cwd"',)):
+    cwd, first, head_title = "", "", ""
+    for d in _read_head(path, need=(b'"cwd"', b'"aiTitle"', b'"summary"', b'"custom-title"', b'"user"')):
         cwd = cwd or d.get("cwd") or ""
+        if not head_title and d.get("type") in ("ai-title", "summary", "custom-title"):
+            t = d.get("aiTitle") or d.get("summary") or d.get("customTitle") or d.get("title")
+            if isinstance(t, str) and t.strip():
+                head_title = t.strip()
         if not first and d.get("type") == "user" and not d.get("isMeta"):
             t = _first_text((d.get("message") or {}).get("content"))
             if t and not t.lstrip().startswith(("<command-", "<local-command", "Caveat:")):
                 first = t
-        if cwd and first:
+        if cwd and first and head_title:
             break
     if not cwd:
         return None
-    return {"id": sid, "tool": "claude", "dir": cwd, "title": _clean_title(_tail_title(path) or first)}
+    # a late rename in the tail wins, then the name from the head, then the first message
+    return {"id": sid, "tool": "claude", "dir": cwd,
+            "title": _clean_title(_tail_title(path) or head_title or first)}
 
 
 def _scan_codex(path: str) -> dict | None:
@@ -947,7 +953,10 @@ NO_PROXY_PREFIX = "env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy
 
 def proxy_prefix(name: str) -> str | None:
     """Env prefix that runs a command through a proxy from the local config ("direct" = none).
-    Optional comma-separated "no_proxy" hosts are passed in both environment variable cases."""
+    Optional comma-separated "no_proxy" hosts are passed in both environment variable cases.
+    An optional per-proxy "tz" value (an IANA time zone such as America/New_York) is passed
+    along so the agent's local time follows the proxy's exit point; "direct" keeps the
+    machine's own time zone."""
     if name == "direct":
         return NO_PROXY_PREFIX
     p = next((p for p in CFG.get("proxies") or [] if p.get("url") and p.get("name") == name), None)
@@ -958,13 +967,16 @@ def proxy_prefix(name: str) -> str | None:
     if p.get("no_proxy"):
         nq = shlex.quote(str(p["no_proxy"]))
         pre += f" NO_PROXY={nq} no_proxy={nq}"
+    if p.get("tz"):
+        pre += f" TZ={shlex.quote(str(p['tz']))}"
     return pre
 
 
 def proxy_export(name: str) -> str | None:
     """Line to paste into a shell: route this shell through the proxy (or drop the proxy).
     Only HTTPS_PROXY: the agents talk https, and a second copy of the URL reads like a doubled paste.
-    Optional comma-separated "no_proxy" hosts are appended in both variable cases."""
+    Optional comma-separated "no_proxy" hosts are appended in both variable cases.
+    A per-proxy "tz" is appended so the shell's clock follows the proxy too."""
     if name == "direct":
         return "unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy ALL_PROXY all_proxy"
     p = next((p for p in CFG.get("proxies") or [] if p.get("url") and p.get("name") == name), None)
@@ -974,12 +986,15 @@ def proxy_export(name: str) -> str | None:
     if p.get("no_proxy"):
         nq = shlex.quote(str(p["no_proxy"]))
         line += f" NO_PROXY={nq} no_proxy={nq}"
+    if p.get("tz"):
+        line += " TZ=" + shlex.quote(str(p["tz"]))
     return line
 
 
-def agent_command(tool: str, sid: str, skip: bool, proxy: str = "") -> str | None:
+def agent_command(tool: str, sid: str, skip: bool, proxy: str = "", worktree: bool = False) -> str | None:
     """Empty sid = new session. Prefix (e.g. HTTPS_PROXY=...) and flags come from the config;
-    `proxy` (a name from the config, or "direct") replaces the configured prefix."""
+    `proxy` (a name from the config, or "direct") replaces the configured prefix.
+    `worktree` adds `-w` to a new claude session (ignored for resume and other tools)."""
     q = shlex.quote(sid) if sid else ""
     a = dict(CFG["agents"].get("claude" if tool in ("claude", "claude-ext") else tool, {}))
     proxy = proxy or a.get("proxy") or ""
@@ -992,6 +1007,8 @@ def agent_command(tool: str, sid: str, skip: bool, proxy: str = "") -> str | Non
         flags = (a.get("flags") or "").replace("--dangerously-skip-permissions", "").strip()
         if skip:
             flags = (flags + " --dangerously-skip-permissions").strip()
+        if worktree and not sid:
+            flags = (flags + " -w").strip()
         core = f"claude --resume {q}" if sid else "claude"
     elif tool == "codex":
         flags = a.get("flags") or ""
@@ -1018,7 +1035,7 @@ async def open_agent(q: dict) -> str:
         d = d or STATE["cwd"] or ""
         q.setdefault("skip", "1" if CFG["agents"]["claude"].get("skip_permissions") else "0")
         q.setdefault("where", CFG.get("open_in", "window"))
-    cmd = agent_command(tool, sid, q.get("skip") == "1", q.get("proxy", ""))
+    cmd = agent_command(tool, sid, q.get("skip") == "1", q.get("proxy", ""), q.get("wt") == "1")
     if not cmd:
         return f"cannot launch {tool}" + (f" via {q['proxy']}" if q.get("proxy") else "")
     if d and not os.path.isdir(d):
@@ -1301,6 +1318,7 @@ def _save_network(new: dict, cfg: dict) -> str | None:
     """Proxies, servers and the router from the Settings page. Returns an error or None."""
     if isinstance(new.get("proxies"), list):
         old = {px.get("name"): px.get("url", "") for px in cfg.get("proxies") or []}
+        old_tz = {px.get("name"): px.get("tz") for px in cfg.get("proxies") or [] if px.get("tz")}
         out, seen = [], set()
         for px in new["proxies"]:
             if not isinstance(px, dict):
@@ -1319,6 +1337,10 @@ def _save_network(new: dict, cfg: dict) -> str | None:
             no_proxy = str(px.get("no_proxy") or "").strip()
             if no_proxy:
                 item["no_proxy"] = no_proxy
+            # tz is set in the config file only, the page does not send it: keep the stored one
+            tz = str(px.get("tz") or old_tz.get(px.get("orig") or name) or "").strip()
+            if tz:
+                item["tz"] = tz
             out.append(item)
         cfg["proxies"] = out
     if isinstance(new.get("servers"), list):

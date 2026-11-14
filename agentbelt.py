@@ -953,6 +953,7 @@ NO_PROXY_PREFIX = "env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy
 
 def proxy_prefix(name: str) -> str | None:
     """Env prefix that runs a command through a proxy from the local config ("direct" = none).
+    Optional comma-separated "no_proxy" hosts are passed in both environment variable cases.
     An optional per-proxy "tz" value (an IANA time zone such as America/New_York) is passed
     along so the agent's local time follows the proxy's exit point; "direct" keeps the
     machine's own time zone."""
@@ -963,6 +964,9 @@ def proxy_prefix(name: str) -> str | None:
         return None
     q = shlex.quote(p["url"])
     pre = f"HTTPS_PROXY={q} HTTP_PROXY={q}"
+    if p.get("no_proxy"):
+        nq = shlex.quote(str(p["no_proxy"]))
+        pre += f" NO_PROXY={nq} no_proxy={nq}"
     if p.get("tz"):
         pre += f" TZ={shlex.quote(str(p['tz']))}"
     return pre
@@ -971,6 +975,7 @@ def proxy_prefix(name: str) -> str | None:
 def proxy_export(name: str) -> str | None:
     """Line to paste into a shell: route this shell through the proxy (or drop the proxy).
     Only HTTPS_PROXY: the agents talk https, and a second copy of the URL reads like a doubled paste.
+    Optional comma-separated "no_proxy" hosts are appended in both variable cases.
     A per-proxy "tz" is appended so the shell's clock follows the proxy too."""
     if name == "direct":
         return "unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy ALL_PROXY all_proxy"
@@ -978,6 +983,9 @@ def proxy_export(name: str) -> str | None:
     if not p:
         return None
     line = "export HTTPS_PROXY=" + shlex.quote(p["url"])
+    if p.get("no_proxy"):
+        nq = shlex.quote(str(p["no_proxy"]))
+        line += f" NO_PROXY={nq} no_proxy={nq}"
     if p.get("tz"):
         line += " TZ=" + shlex.quote(str(p["tz"]))
     return line
@@ -1310,6 +1318,7 @@ def _save_network(new: dict, cfg: dict) -> str | None:
     """Proxies, servers and the router from the Settings page. Returns an error or None."""
     if isinstance(new.get("proxies"), list):
         old = {px.get("name"): px.get("url", "") for px in cfg.get("proxies") or []}
+        old_tz = {px.get("name"): px.get("tz") for px in cfg.get("proxies") or [] if px.get("tz")}
         out, seen = [], set()
         for px in new["proxies"]:
             if not isinstance(px, dict):
@@ -1324,7 +1333,15 @@ def _save_network(new: dict, cfg: dict) -> str | None:
             if not PROXY_URL.match(url):
                 return f"proxy «{name}»: expected scheme://[user:pass@]host:port"
             seen.add(name)
-            out.append({"name": name, "url": url})
+            item = {"name": name, "url": url}
+            no_proxy = str(px.get("no_proxy") or "").strip()
+            if no_proxy:
+                item["no_proxy"] = no_proxy
+            # tz is set in the config file only, the page does not send it: keep the stored one
+            tz = str(px.get("tz") or old_tz.get(px.get("orig") or name) or "").strip()
+            if tz:
+                item["tz"] = tz
+            out.append(item)
         cfg["proxies"] = out
     if isinstance(new.get("servers"), list):
         out = []

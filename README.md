@@ -83,6 +83,8 @@ They run in GitHub Actions on every push (`.github/workflows/tests.yml`); locall
 
 `~/.config/agentbelt/config.json` (mode 600, it may hold a proxy with a password). Everything is editable on the ⚙ page in Sessions (proxies, servers and the router in the **Network** section), or by hand, see `config.example.json`. The config is yours alone and never goes into the repo.
 
+A proxy entry may carry an optional `"tz"` — an IANA time zone such as `America/New_York`. Launches and the ⧉ export line through that proxy then set `TZ` too, so the agent's local time always follows the proxy's exit point; `direct` keeps the machine's own time zone.
+
 ```json
 {
   "agents": {
@@ -99,6 +101,12 @@ They run in GitHub Actions on every push (`.github/workflows/tests.yml`); locall
 ```
 
 `repo_checks` are your own lines in Git & PR: if `file` exists in the repo root, `cmd` runs; exit code 0 is shown green, anything else red.
+
+Each entry in `proxies` can also set an optional `no_proxy` string of comma-separated hosts/domains,
+for example `"no_proxy": "github.com,.github.com,.githubusercontent.com"` (see `config.example.json`).
+Edit it in ⚙ → Network or in the config file. Agent launches using that proxy and **⧉ export** set both
+`NO_PROXY` and `no_proxy`, so clients that support these variables connect directly to matching hosts.
+If the field is empty or omitted, the existing proxy command is unchanged and inherited exclusions are kept.
 
 ## What iTerm2 already has
 

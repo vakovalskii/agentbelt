@@ -169,6 +169,25 @@ def test_scan_claude_skips_commands_and_prefers_ai_title(t):
     assert t._scan_claude(p)["title"] == "Login page fix"
 
 
+def test_scan_claude_title_from_head_of_long_session(t):
+    # ai-title is written at the very start; long sessions push it out of the 64 KB tail
+    p = _claude_session(t, "long", "/w/repo", [
+        {"type": "ai-title", "aiTitle": "План доклада", "sessionId": "long"},
+        {"type": "user", "cwd": "/w/repo", "message": {"content": "у меня есть идея упаковать всю теорию"}},
+    ])
+    _jl(p, [{"type": "user", "cwd": "/w/repo", "message": {"content": "x" * 200}} for _ in range(900)], "a")
+    assert t._scan_claude(p)["title"] == "План доклада"
+
+
+def test_scan_claude_first_message_without_cwd_marker(t):
+    # real transcripts carry cwd deep inside long lines, not per user message
+    p = _claude_session(t, "nocwd", "/w/repo", [
+        {"cwd": "/w/repo"},
+        {"type": "user", "message": {"role": "user", "content": "Помоги с рефакторингом"}},
+    ])
+    assert t._scan_claude(p)["title"] == "Помоги с рефакторингом"
+
+
 def test_scan_codex(t, tmp_path):
     p = tmp_path / "rollout.jsonl"
     _jl(p, [{"type": "session_meta", "payload": {"id": "cx-1", "cwd": "/w/r"}},
@@ -499,9 +518,13 @@ def test_active_agents_includes_pi_without_a_terminal_but_not_suspended(t, monke
 # ─────────────── launching agents ───────────────
 
 
-def test_proxy_prefix_and_export(t):
-    assert t.proxy_prefix("eu-1") == "HTTPS_PROXY=http://user:s3cret@203.0.113.10:3128 " \
-                                     "HTTP_PROXY=http://user:s3cret@203.0.113.10:3128"
+@pytest.mark.parametrize("no_proxy", [None, ""])
+def test_proxy_prefix_and_export(t, no_proxy):
+    if no_proxy is not None:
+        t.CFG["proxies"][0]["no_proxy"] = no_proxy
+    expected = "HTTPS_PROXY=http://user:s3cret@203.0.113.10:3128 " \
+               "HTTP_PROXY=http://user:s3cret@203.0.113.10:3128"
+    assert t.proxy_prefix("eu-1") == expected
     assert t.proxy_prefix("direct").startswith("env -u HTTPS_PROXY")
     assert t.proxy_prefix("nope") is None
     assert t.proxy_export("eu-1") == "export HTTPS_PROXY=http://user:s3cret@203.0.113.10:3128"
@@ -514,6 +537,49 @@ def test_proxy_prefix_quotes_shell_characters(t):
     assert "'http://u:p$a;ss@1.2.3.4:1'" in t.proxy_prefix("odd")
 
 
+def test_proxy_prefix_and_export_with_no_proxy(t):
+    no_proxy = "github.com,.github.com,.githubusercontent.com"
+    t.CFG["proxies"][0]["no_proxy"] = no_proxy
+    expected = "HTTPS_PROXY=http://user:s3cret@203.0.113.10:3128 " \
+               "HTTP_PROXY=http://user:s3cret@203.0.113.10:3128 " \
+               f"NO_PROXY={no_proxy} no_proxy={no_proxy}"
+    assert t.proxy_prefix("eu-1") == expected
+    assert t.proxy_export("eu-1") == "export HTTPS_PROXY=http://user:s3cret@203.0.113.10:3128 " \
+                                     f"NO_PROXY={no_proxy} no_proxy={no_proxy}"
+    assert "NO_PROXY=" not in t.proxy_prefix("us-1")
+
+
+@pytest.mark.parametrize("export", [False, True])
+def test_proxy_no_proxy_survives_shell_quoting(t, export):
+    no_proxy = "localhost,space here,'quote',$HOME,$(printf expanded),`printf expanded`; printf injected"
+    t.CFG["proxies"][0]["no_proxy"] = no_proxy
+    prefix = t.proxy_export("eu-1") + ";" if export else t.proxy_prefix("eu-1")
+    command = prefix + " /bin/sh -c " + shlex.quote('printf \'%s\\n%s\' "$NO_PROXY" "$no_proxy"')
+    result = subprocess.run(["/bin/sh", "-c", command], capture_output=True, text=True, check=True)
+    assert result.stdout == no_proxy + "\n" + no_proxy
+    assert result.stderr == ""
+
+
+@pytest.mark.parametrize("tool", ["claude", "codex", "pi", "omp"])
+@pytest.mark.parametrize("default_proxy", [False, True])
+def test_agent_command_passes_proxy_exclusions(t, tool, default_proxy):
+    no_proxy = "github.com,.github.com"
+    t.CFG["proxies"][0]["no_proxy"] = no_proxy
+    if default_proxy:
+        t.CFG["agents"][tool]["proxy"] = "eu-1"
+    command = t.agent_command(tool, "session-1234", False, "" if default_proxy else "eu-1")
+    assert f"NO_PROXY={no_proxy} no_proxy={no_proxy} {tool} " in command
+
+
+def test_proxy_prefix_passes_per_proxy_timezone(t):
+    t.CFG["proxies"] = [{"name": "us-1", "url": "http://bob:pa55@198.51.100.7:8080", "tz": "America/New_York"}]
+    assert t.proxy_prefix("us-1").endswith(" TZ=America/New_York")
+    assert t.proxy_export("us-1").endswith(" TZ=America/New_York")
+    t.CFG["proxies"] = [{"name": "us-1", "url": "http://bob:pa55@198.51.100.7:8080"}]
+    assert "TZ=" not in t.proxy_prefix("us-1")
+    assert "TZ=" not in (t.proxy_prefix("direct") or "")
+
+
 def test_agent_command_claude(t):
     t.CFG["agents"]["claude"].update(prefix="FOO=1", flags="--model opus --dangerously-skip-permissions")
     assert t.agent_command("claude", "", False) == "FOO=1 claude --model opus"
@@ -521,6 +587,14 @@ def test_agent_command_claude(t):
     # a proxy from the list replaces the prefix
     cmd = t.agent_command("claude", "", True, "us-1")
     assert cmd.startswith("HTTPS_PROXY=http://bob:pa55@198.51.100.7:8080") and "FOO=1" not in cmd
+
+
+def test_agent_command_worktree_flag(t):
+    # new claude session with the worktree checkbox: -w lands after the command
+    assert t.agent_command("claude", "", False, "", True) == "claude -w"
+    # resume ignores the checkbox, and so do other tools
+    assert t.agent_command("claude", "abc", False, "", True) == "claude --resume abc"
+    assert t.agent_command("codex", "", False, "", True) == "codex"
     assert t.agent_command("claude", "", True, "missing") is None
 
 
@@ -790,6 +864,37 @@ def test_settings_round_trip_keeps_stored_passwords(t):
     assert os.stat(t.CONFIG_FILE).st_mode & 0o777 == 0o600
 
 
+@pytest.mark.parametrize("name", ["eu-1", "eu-main"])
+def test_settings_round_trip_keeps_no_proxy_and_masked_password(t, name):
+    no_proxy = "github.com,.github.com,.githubusercontent.com"
+    t.CFG["proxies"][0]["no_proxy"] = no_proxy
+    t.save_config(t.CFG)
+    shown = t.settings_state()["config"]["proxies"]
+    assert shown[0]["no_proxy"] == no_proxy
+    assert shown[0]["url"] == "http://user:***@203.0.113.10:3128"
+    proxies = [dict(p, orig=p["name"]) for p in shown]
+    proxies[0]["name"] = name
+    assert _save(t, {"proxies": proxies}) == "ok"
+    expected = [dict(PROXIES[0], name=name, no_proxy=no_proxy), PROXIES[1]]
+    assert t.CFG["proxies"] == expected
+    assert t.load_config()["proxies"] == expected
+
+
+@pytest.mark.parametrize("value, expected", [("  github.com,.github.com  ", "github.com,.github.com"),
+                                             ("", None), ("   ", None)])
+def test_settings_updates_or_clears_no_proxy(t, value, expected):
+    t.CFG["proxies"][0]["no_proxy"] = "old.example.com"
+    t.save_config(t.CFG)
+    proxies = t.settings_state()["config"]["proxies"]
+    proxies[0]["no_proxy"] = value
+    assert _save(t, {"proxies": proxies}) == "ok"
+    saved = dict(PROXIES[0])
+    if expected is not None:
+        saved["no_proxy"] = expected
+    assert t.CFG["proxies"] == [saved, PROXIES[1]]
+    assert t.load_config()["proxies"] == [saved, PROXIES[1]]
+
+
 def test_settings_save_keeps_pi_and_omp_launch_options(t):
     agents = {"pi": {"prefix": "PI_DEBUG=1", "flags": "--model fast", "proxy": "direct"},
               "omp": {"prefix": "OMP_DEBUG=1", "flags": "--model quick", "proxy": ""}}
@@ -1049,3 +1154,14 @@ def test_page_scripts_parse(page, tmp_path):
         f.write_text(js)
         r = subprocess.run(["node", "--check", str(f)], capture_output=True, text=True)
         assert r.returncode == 0, r.stderr
+
+
+def test_settings_save_keeps_proxy_timezone(t):
+    t.CFG["proxies"][0]["tz"] = "Asia/Almaty"
+    t.save_config(t.CFG)
+    proxies = [dict(p, orig=p["name"]) for p in t.settings_state()["config"]["proxies"]]
+    for p in proxies:
+        p.pop("tz", None)
+    assert _save(t, {"proxies": proxies}) == "ok"
+    assert t.CFG["proxies"][0]["tz"] == "Asia/Almaty"
+    assert "tz" not in t.CFG["proxies"][1]
